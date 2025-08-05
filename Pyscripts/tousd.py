@@ -123,31 +123,30 @@ currency_to_usd = {
     'YER': 0.0040,
     'UAH': 0.027,
     'CUP': 0.038,
-    'XAF': 0.0018,  # Центральноафриканский CFA франк
-    'CFP': 0.0091,  # CFP franc (уже есть)
-    'BHD': 2.65,    # Bahraini dinar
-    'MRU': 0.027,   # Mauritanian ouguiya
-    'PEN': 0.30,    # Peruvian sol
-    'SOS': 0.0018,  # Somali shilling
-    'FJD': 0.4459,  # 1 FJD ≈ 0.4459 USD :contentReference[oaicite:1]{index=1}
-    'DOP': 0.0166,  # 1 DOP ≈ 0.0166 USD :contentReference[oaicite:2]{index=2}
-    'ISK': 0.00826, # 1 ISK ≈ 0.00826 USD :contentReference[oaicite:3]{index=3}
-    'PKR': 0.0036,  # Пакистанская рупия – приблизительно 0.0036 USD (ориентир)
-    'JOD': 1.41,    # Иорданский динар — около 1.41 USD (ориентир)
-    'GYD': 0.0048,  # Гайанский доллар ≈ 0.0048 USD
-    'AWG': 0.56,    # Арубский флорин ≈ 0.56 USD
-    'MXN': 0.057,   # Мексиканское песо ≈ 0.057 USD
-    'MUR': 0.024,   # Маврикийская рупия ≈ 0.024 USD
-    'KWD': 3.28,    # Кувейтский динар ≈ 3.28 USD
-    'SLL': 0.000051,# Сьерра-Леоне леоне ≈ 0.000051 USD
-    'MMK': 0.00049, # Мьянманский кьят ≈ 0.00049 USD
-    "PLN": 0.25,   # Polish Zloty
-    "SYP": 0.00040 # Syrian Pound (очень низкий курс)
+    'XAF': 0.0018,  
+    'CFP': 0.0091,  
+    'BHD': 2.65,    
+    'MRU': 0.027,   
+    'PEN': 0.30,   
+    'SOS': 0.0018, 
+    'FJD': 0.4459,  
+    'DOP': 0.0166, 
+    'ISK': 0.00826, 
+    'PKR': 0.0036,  
+    'JOD': 1.41,    
+    'GYD': 0.0048,  
+    'AWG': 0.56,    
+    'MXN': 0.057,   
+    'MUR': 0.024,   
+    'KWD': 3.28,    
+    'SLL': 0.000051,
+    'MMK': 0.00049, 
+    "PLN": 0.25,
+    "SYP": 0.00040
 }
 
 
 df = pd.read_excel('Cleaned_SurveyData.xlsx', sheet_name='Main')
-
 df['CompTotal'] = pd.to_numeric(df['CompTotal'], errors='coerce')
 
 
@@ -165,18 +164,15 @@ def extract_currency_code(currency_str):
     return currency_str.split(" ")[0].strip()
 
 df['CurrencyCode'] = df['Currency'].apply(extract_currency_code)
-
 df['salaryusd'] = df.apply(
     lambda r: conv_usd(r['CurrencyCode'],  r['CompTotal']),
     axis=1
 )
 
 df = df[df['salaryusd'].notna() & (df['salaryusd'] > 100) & (df['salaryusd'] < 500_000)]
-
 print(df[['Currency', 'CurrencyCode', 'CompTotal', 'ConvertedCompYearly', 'salaryusd']].head(20))
 
 engine = create_engine('postgresql+psycopg2://postgres:2281337@localhost:5432/stackoverflow')
-
 update_data = [
     {"usd": row["salaryusd"], "rid": int(row["ResponseId"])}
     for _, row in df.iterrows()
