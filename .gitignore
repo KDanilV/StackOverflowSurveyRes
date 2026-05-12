@@ -137,6 +137,7 @@ celerybeat.pid
 # Environments
 .env
 .envrc
+kaggle.json
 .venv
 env/
 venv/
@@ -205,3 +206,13 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Local agent instructions
+AGENTS.md
+
+# Generated data artifacts
+data/raw/~$*.xlsx
+data/processed/*
+!data/processed/.gitkeep
+data/processed/~$*.xlsx
+logs/
