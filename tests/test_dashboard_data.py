@@ -1,7 +1,9 @@
 import pandas as pd
 
 from stackoverflow_analytics.dashboard_data import (
+    contains_any_multiselect_value,
     filter_main_table,
+    filter_multiyear_core,
     language_popularity,
     median_salary_by_group,
     multiyear_ai_adoption_trend,
@@ -9,6 +11,8 @@ from stackoverflow_analytics.dashboard_data import (
     multiyear_top_technologies,
     prepare_main_table,
     salary_by_country,
+    salary_map_by_country,
+    split_multiselect_values,
     technology_count_distribution,
     technology_popularity,
     top_counts,
@@ -46,6 +50,58 @@ def test_filter_main_table_applies_selected_filters():
     result = filter_main_table(source, countries=["A"], remote_work=["Remote"])
 
     assert result["ResponseId"].tolist() == [1]
+
+
+def test_filter_multiyear_core_applies_sidebar_filters():
+    source = pd.DataFrame(
+        [
+            {
+                "SurveyYear": 2024,
+                "ResponseId": 1,
+                "Country": "A",
+                "RemoteWork": "Remote",
+                "EdLevel": "Bachelor",
+                "DevType": "Developer, back-end;Developer, full-stack",
+            },
+            {
+                "SurveyYear": 2025,
+                "ResponseId": 2,
+                "Country": "B",
+                "RemoteWork": "Hybrid",
+                "EdLevel": "Master",
+                "DevType": "Data scientist",
+            },
+        ]
+    )
+
+    result = filter_multiyear_core(
+        source,
+        years=[2024],
+        countries=["A"],
+        remote_work=["Remote"],
+        education=["Bachelor"],
+        developer_type=["Developer, full-stack"],
+    )
+
+    assert result["ResponseId"].tolist() == [1]
+
+
+def test_filter_multiyear_core_empty_year_selection_returns_no_rows():
+    source = pd.DataFrame({"SurveyYear": [2024], "ResponseId": [1]})
+
+    result = filter_multiyear_core(source, years=[])
+
+    assert result.empty
+
+
+def test_multiselect_helpers_split_and_match_values():
+    source = pd.Series(["Developer, back-end; Developer, full-stack", None, "Data scientist"])
+
+    values = split_multiselect_values(source)
+    mask = contains_any_multiselect_value(source, ["Developer, full-stack"])
+
+    assert values.tolist() == ["Developer, back-end", "Developer, full-stack", "Data scientist"]
+    assert mask.tolist() == [True, False, False]
 
 
 def test_top_counts_returns_sorted_counts():
@@ -162,6 +218,20 @@ def test_multiyear_salary_trend_uses_median_by_year():
     assert result.loc[result["SurveyYear"] == 2024, "median_salary_usd"].iloc[0] == 200
 
 
+def test_multiyear_salary_trend_filters_selected_years():
+    core = pd.DataFrame(
+        {
+            "SurveyYear": [2024, 2025],
+            "ResponseId": [1, 2],
+            "ConvertedCompYearly": [100, 500],
+        }
+    )
+
+    result = multiyear_salary_trend(core, years=[2025])
+
+    assert result["SurveyYear"].tolist() == [2025]
+
+
 def test_multiyear_ai_adoption_trend_counts_statuses():
     core = pd.DataFrame(
         {
@@ -174,6 +244,20 @@ def test_multiyear_ai_adoption_trend_counts_statuses():
     result = multiyear_ai_adoption_trend(core)
 
     assert result["respondents"].sum() == 2
+
+
+def test_multiyear_ai_adoption_trend_filters_selected_years():
+    core = pd.DataFrame(
+        {
+            "SurveyYear": [2024, 2025],
+            "ResponseId": [1, 2],
+            "AIAdoption": ["Использует AI", "Не использует AI"],
+        }
+    )
+
+    result = multiyear_ai_adoption_trend(core, years=[2025])
+
+    assert result["SurveyYear"].tolist() == [2025]
 
 
 def test_multiyear_top_technologies_filters_category_and_intent():
@@ -190,3 +274,43 @@ def test_multiyear_top_technologies_filters_category_and_intent():
     result = multiyear_top_technologies(counts, "language", "worked")
 
     assert result["Technology"].tolist() == ["Python"]
+
+
+def test_multiyear_top_technologies_filters_selected_years():
+    counts = pd.DataFrame(
+        {
+            "SurveyYear": [2024, 2025],
+            "Category": ["language", "language"],
+            "Intent": ["worked", "worked"],
+            "Technology": ["Python", "Rust"],
+            "Respondents": [10, 7],
+        }
+    )
+
+    result = multiyear_top_technologies(counts, "language", "worked", years=[2025])
+
+    assert result["Technology"].tolist() == ["Rust"]
+
+
+def test_salary_map_by_country_filters_by_year_and_threshold():
+    core = pd.DataFrame(
+        {
+            "SurveyYear": [2024, 2024, 2024, 2025],
+            "ResponseId": [1, 2, 3, 4],
+            "Country": ["A", "A", "B", "A"],
+            "ConvertedCompYearly": [100, 300, 1000, 500],
+        }
+    )
+
+    result = salary_map_by_country(core, years=[2024], min_respondents=2)
+
+    assert result.to_dict("records") == [
+        {"Country": "A", "median_salary_usd": 200.0, "respondents": 2}
+    ]
+
+
+def test_salary_map_by_country_handles_missing_required_columns():
+    result = salary_map_by_country(pd.DataFrame({"SurveyYear": [2024]}))
+
+    assert result.empty
+    assert result.columns.tolist() == ["Country", "median_salary_usd", "respondents"]
