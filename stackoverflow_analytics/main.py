@@ -106,6 +106,8 @@ def clean_survey_data(df):
 
 
 def write_tables_to_excel(output_tables, output_file, manifest_file):
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
     used_sheet_names = set()
     manifest = {"sheets": {}}
 

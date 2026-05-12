@@ -4,6 +4,8 @@ ETL and Streamlit analytics project for the Stack Overflow Developer Survey. The
 repository prepares raw survey data, normalizes multi-select answers, validates processed
 outputs, and serves an interactive Streamlit dashboard.
 
+Balloon idea credit: [Andekster](https://github.com/Andekster).
+
 ## Project Scope
 
 - Clean and validate Stack Overflow Developer Survey data.
@@ -63,6 +65,9 @@ Run the dashboard:
 ```powershell
 uv run streamlit run app/streamlit_app.py
 ```
+
+If generated outputs are missing, the dashboard creates the cleaned workbook and multi-year
+EDA files from `data/raw/` during the first startup.
 
 Current dashboard sections:
 
