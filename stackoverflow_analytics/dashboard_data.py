@@ -118,6 +118,48 @@ def filter_main_table(main, countries=None, remote_work=None, education=None):
     return filtered
 
 
+def split_multiselect_values(values: pd.Series) -> pd.Series:
+    split_values = values.fillna("").astype(str).str.split(";").explode().str.strip()
+    return split_values[split_values != ""]
+
+
+def contains_any_multiselect_value(values: pd.Series, selected_values: list[str]) -> pd.Series:
+    selected = set(selected_values)
+    split_values = values.fillna("").astype(str).str.split(";")
+    return split_values.apply(lambda items: bool({item.strip() for item in items} & selected))
+
+
+def filter_multiyear_core(
+    core,
+    years=None,
+    countries=None,
+    remote_work=None,
+    education=None,
+    developer_type=None,
+):
+    filtered = core.copy()
+
+    if filtered.empty:
+        return filtered
+
+    if years is not None:
+        if not years:
+            return filtered.iloc[0:0].copy()
+        if "SurveyYear" in filtered:
+            filtered = filtered[filtered["SurveyYear"].isin(years)]
+
+    if countries and "Country" in filtered:
+        filtered = filtered[filtered["Country"].isin(countries)]
+    if remote_work and "RemoteWork" in filtered:
+        filtered = filtered[filtered["RemoteWork"].isin(remote_work)]
+    if education and "EdLevel" in filtered:
+        filtered = filtered[filtered["EdLevel"].isin(education)]
+    if developer_type and "DevType" in filtered:
+        filtered = filtered[contains_any_multiselect_value(filtered["DevType"], developer_type)]
+
+    return filtered
+
+
 def filter_by_response_ids(frame, response_ids):
     if response_ids is None or "ResponseId" not in frame.columns:
         return frame
@@ -156,6 +198,25 @@ def median_salary_by_group(main, group_column, limit=20):
 
 def salary_by_country(main, limit=20):
     return median_salary_by_group(main, "Country", limit)
+
+
+def median_compensation_by_group(core, group_column, limit=20):
+    if group_column not in core.columns:
+        return pd.DataFrame(columns=[group_column, "median_salary_usd", "respondents"])
+
+    salary = core.dropna(subset=[group_column, "ConvertedCompYearly"])
+    if salary.empty:
+        return pd.DataFrame(columns=[group_column, "median_salary_usd", "respondents"])
+
+    return (
+        salary.groupby(group_column, as_index=False)
+        .agg(
+            median_salary_usd=("ConvertedCompYearly", "median"),
+            respondents=("ResponseId", "count"),
+        )
+        .sort_values(["median_salary_usd", "respondents"], ascending=[False, False])
+        .head(limit)
+    )
 
 
 def language_popularity(language, response_ids=None, limit=20):
@@ -242,7 +303,7 @@ def read_multiyear_core(input_file=MULTIYEAR_CORE_FILE):
     if not input_file.exists():
         return pd.DataFrame()
 
-    core = pd.read_csv(input_file)
+    core = pd.read_csv(input_file, low_memory=False)
     numeric_columns = [
         "SurveyYear",
         "ConvertedCompYearly",
@@ -267,7 +328,14 @@ def read_multiyear_technology_counts(input_file=MULTIYEAR_TECHNOLOGY_COUNTS_FILE
     return counts
 
 
-def multiyear_salary_trend(core):
+def filter_multiyear_years(frame, years=None):
+    if frame.empty or not years or "SurveyYear" not in frame:
+        return frame
+    return frame[frame["SurveyYear"].isin(years)]
+
+
+def multiyear_salary_trend(core, years=None):
+    core = filter_multiyear_years(core, years)
     if core.empty:
         return pd.DataFrame(columns=["SurveyYear", "median_salary_usd", "respondents"])
 
@@ -282,7 +350,8 @@ def multiyear_salary_trend(core):
     )
 
 
-def multiyear_remote_trend(core):
+def multiyear_remote_trend(core, years=None):
+    core = filter_multiyear_years(core, years)
     if core.empty or "RemoteWork" not in core:
         return pd.DataFrame(columns=["SurveyYear", "RemoteWork", "respondents"])
 
@@ -294,7 +363,8 @@ def multiyear_remote_trend(core):
     )
 
 
-def multiyear_ai_adoption_trend(core):
+def multiyear_ai_adoption_trend(core, years=None):
+    core = filter_multiyear_years(core, years)
     if core.empty or "AIAdoption" not in core:
         return pd.DataFrame(columns=["SurveyYear", "AIAdoption", "respondents"])
 
@@ -306,7 +376,8 @@ def multiyear_ai_adoption_trend(core):
     )
 
 
-def multiyear_top_technologies(technology_counts, category, intent="worked", limit=10):
+def multiyear_top_technologies(technology_counts, category, intent="worked", limit=10, years=None):
+    technology_counts = filter_multiyear_years(technology_counts, years)
     if technology_counts.empty:
         return pd.DataFrame(
             columns=["SurveyYear", "Category", "Intent", "Technology", "Respondents"]
@@ -327,3 +398,32 @@ def multiyear_top_technologies(technology_counts, category, intent="worked", lim
     return filtered[filtered["Technology"].isin(top_technologies)].sort_values(
         ["SurveyYear", "Respondents"], ascending=[True, False]
     )
+
+
+def salary_map_by_country(core, years=None, min_respondents=30):
+    columns = ["Country", "median_salary_usd", "respondents"]
+    required_columns = {"Country", "ConvertedCompYearly", "ResponseId"}
+    if core.empty or not required_columns.issubset(core.columns):
+        return pd.DataFrame(columns=columns)
+
+    salary = core.copy()
+    salary = filter_multiyear_years(salary, years)
+
+    salary = salary.dropna(subset=["Country", "ConvertedCompYearly"])
+    salary["Country"] = salary["Country"].astype(str).str.strip()
+    salary = salary[salary["Country"] != ""]
+    salary["ConvertedCompYearly"] = pd.to_numeric(salary["ConvertedCompYearly"], errors="coerce")
+    salary = salary.dropna(subset=["ConvertedCompYearly"])
+    if salary.empty:
+        return pd.DataFrame(columns=columns)
+
+    result = (
+        salary.groupby("Country", as_index=False)
+        .agg(
+            median_salary_usd=("ConvertedCompYearly", "median"),
+            respondents=("ResponseId", "count"),
+        )
+        .query("respondents >= @min_respondents")
+        .sort_values("median_salary_usd", ascending=False)
+    )
+    return result

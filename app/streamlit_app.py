@@ -4,14 +4,22 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from stackoverflow_analytics.config import (  # noqa: E402
+    CLEANED_SURVEY_FILE,
+    MULTIYEAR_CORE_FILE,
+    MULTIYEAR_TECHNOLOGY_COUNTS_FILE,
+)
 from stackoverflow_analytics.dashboard_data import (
+    contains_any_multiselect_value,
     filter_main_table,
+    filter_multiyear_core,
     language_popularity,
-    median_salary_by_group,
+    median_compensation_by_group,
     multiyear_ai_adoption_trend,
     multiyear_remote_trend,
     multiyear_salary_trend,
@@ -23,14 +31,24 @@ from stackoverflow_analytics.dashboard_data import (
     read_multiyear_technology_counts,
     read_technology_tables,
     read_wanted_language_table,
-    salary_by_country,
+    salary_map_by_country,
+    split_multiselect_values,
     technology_count_distribution,
-    technology_popularity,
     top_counts,
-    worked_vs_wanted_languages,
 )
+from stackoverflow_analytics.main import main as run_cleaning_pipeline  # noqa: E402
+from stackoverflow_analytics.multiyear_eda import run_eda as run_multiyear_eda  # noqa: E402
 
 TEST_MODE_ENV = "STACKOVERFLOW_ANALYTICS_TEST_MODE"
+PAGES = [
+    "Overview",
+    "Salary",
+    "World Map",
+    "Technologies",
+    "AI",
+    "Work & Career",
+    "Trends",
+]
 
 
 @dataclass(frozen=True)
@@ -41,6 +59,16 @@ class DashboardData:
     technology_tables: dict[str, pd.DataFrame]
     multiyear_core: pd.DataFrame
     multiyear_technology_counts: pd.DataFrame
+
+
+@dataclass(frozen=True)
+class SidebarState:
+    page: str
+    countries: list[str]
+    remote_work: list[str]
+    education: list[str]
+    developer_type: list[str]
+    years: list[int]
 
 
 st.set_page_config(
@@ -79,8 +107,15 @@ def build_test_data() -> DashboardData:
             {
                 "SurveyYear": 2024,
                 "ResponseId": 1,
+                "Country": "United States",
                 "RemoteWork": "Remote",
+                "EdLevel": "Bachelor",
+                "Age": "25-34 years old",
+                "DevType": "Developer, full-stack",
                 "ConvertedCompYearly": 100000,
+                "ProfessionalExperience": 5,
+                "AISent": "Favorable",
+                "JobSatNormalized": 8,
                 "AIAdoption": "Использует AI",
             }
         ]
@@ -111,6 +146,8 @@ def load_data() -> DashboardData:
     if os.getenv(TEST_MODE_ENV) == "1":
         return build_test_data()
 
+    ensure_dashboard_outputs()
+
     return DashboardData(
         main=prepare_main_table(read_main_table()),
         language=read_language_table(),
@@ -121,46 +158,159 @@ def load_data() -> DashboardData:
     )
 
 
+def ensure_dashboard_outputs():
+    if not CLEANED_SURVEY_FILE.exists():
+        run_cleaning_pipeline()
+
+    if not MULTIYEAR_CORE_FILE.exists() or not MULTIYEAR_TECHNOLOGY_COUNTS_FILE.exists():
+        run_multiyear_eda()
+
+
 def format_int(value):
     return f"{int(value):,}".replace(",", " ")
 
 
-def render_sidebar(main_table: pd.DataFrame):
+def maybe_show_balloons():
+    if os.getenv(TEST_MODE_ENV) == "1":
+        return
+    if st.session_state.get("balloons_shown"):
+        return
+
+    st.balloons()
+    st.session_state["balloons_shown"] = True
+
+
+def available_survey_years(multiyear_core: pd.DataFrame) -> list[int]:
+    if multiyear_core.empty or "SurveyYear" not in multiyear_core:
+        return []
+    return [
+        int(year) for year in sorted(multiyear_core["SurveyYear"].dropna().astype(int).unique())
+    ]
+
+
+def sidebar_options(source: pd.DataFrame, column: str) -> list[str]:
+    if source.empty or column not in source:
+        return []
+    values = source[column].dropna().astype(str)
+    if column == "DevType":
+        values = split_multiselect_values(source[column])
+    return sorted(values[values != ""].unique())
+
+
+def render_sidebar(main_table: pd.DataFrame, multiyear_core: pd.DataFrame) -> SidebarState:
+    years = available_survey_years(multiyear_core)
+    filter_source = multiyear_core if not multiyear_core.empty else main_table
+
     with st.sidebar:
+        st.header("Navigation")
+        page = st.radio("Page", PAGES, label_visibility="collapsed")
+
+        if years:
+            st.header("Years")
+            selected_years = st.multiselect(
+                "Survey years",
+                years,
+                default=years,
+            )
+        else:
+            selected_years = []
+
         st.header("Filters")
         countries = st.multiselect(
             "Country",
-            sorted(main_table["Country"].dropna().unique()),
+            sidebar_options(filter_source, "Country"),
         )
         remote_work = st.multiselect(
             "Remote work",
-            sorted(main_table["RemoteWork"].dropna().unique()),
+            sidebar_options(filter_source, "RemoteWork"),
         )
         education = st.multiselect(
             "Education",
-            sorted(main_table["EdLevel"].dropna().unique()),
+            sidebar_options(filter_source, "EdLevel"),
         )
         developer_type = st.multiselect(
             "Developer type",
-            sorted(main_table["DevType"].dropna().unique()) if "DevType" in main_table else [],
+            sidebar_options(filter_source, "DevType"),
         )
 
-    return countries, remote_work, education, developer_type
+    return SidebarState(
+        page=page,
+        countries=countries,
+        remote_work=remote_work,
+        education=education,
+        developer_type=developer_type,
+        years=selected_years,
+    )
 
 
-def apply_filters(main_table: pd.DataFrame, filters):
-    countries, remote_work, education, developer_type = filters
-    filtered = filter_main_table(main_table, countries, remote_work, education)
-    if developer_type and "DevType" in filtered:
-        filtered = filtered[filtered["DevType"].isin(developer_type)]
+def apply_filters(main_table: pd.DataFrame, sidebar: SidebarState):
+    filtered = filter_main_table(
+        main_table,
+        sidebar.countries,
+        sidebar.remote_work,
+        sidebar.education,
+    )
+    if sidebar.developer_type and "DevType" in filtered:
+        filtered = filtered[
+            contains_any_multiselect_value(filtered["DevType"], sidebar.developer_type)
+        ]
     return filtered
 
 
-def render_kpis(filtered: pd.DataFrame, language_table: pd.DataFrame, filtered_ids: set):
-    total_respondents = len(filtered)
-    country_count = filtered["Country"].nunique()
-    median_salary = filtered["salaryusd"].median()
-    top_language = language_popularity(language_table, filtered_ids, limit=1)
+def apply_multiyear_filters(multiyear_core: pd.DataFrame, sidebar: SidebarState):
+    return filter_multiyear_core(
+        multiyear_core,
+        years=sidebar.years,
+        countries=sidebar.countries,
+        remote_work=sidebar.remote_work,
+        education=sidebar.education,
+        developer_type=sidebar.developer_type,
+    )
+
+
+def render_kpis(
+    filtered: pd.DataFrame,
+    language_table: pd.DataFrame,
+    filtered_ids: set,
+    filtered_multiyear: pd.DataFrame,
+    technology_counts: pd.DataFrame,
+    selected_years: list[int],
+    has_multiyear_data: bool,
+):
+    if not has_multiyear_data:
+        total_respondents = len(filtered)
+        country_count = filtered["Country"].nunique()
+        median_salary = filtered["salaryusd"].median()
+        top_language_frame = language_popularity(language_table, filtered_ids, limit=1)
+        top_language = (
+            "n/a"
+            if top_language_frame.empty
+            else top_language_frame.iloc[0]["LanguageHaveWorkedWith"]
+        )
+    else:
+        total_respondents = len(filtered_multiyear)
+        country_count = (
+            0 if "Country" not in filtered_multiyear else filtered_multiyear["Country"].nunique()
+        )
+        median_salary = (
+            pd.NA
+            if "ConvertedCompYearly" not in filtered_multiyear
+            else filtered_multiyear["ConvertedCompYearly"].median()
+        )
+        top_language_frame = (
+            pd.DataFrame()
+            if not selected_years
+            else multiyear_top_technologies(
+                technology_counts,
+                category="language",
+                intent="worked",
+                limit=1,
+                years=selected_years,
+            )
+        )
+        top_language = (
+            "n/a" if top_language_frame.empty else top_language_frame.iloc[0]["Technology"]
+        )
 
     kpi_1, kpi_2, kpi_3, kpi_4 = st.columns(4)
     kpi_1.metric("Respondents", format_int(total_respondents))
@@ -171,7 +321,68 @@ def render_kpis(filtered: pd.DataFrame, language_table: pd.DataFrame, filtered_i
     )
     kpi_4.metric(
         "Top language",
-        "n/a" if top_language.empty else top_language.iloc[0]["LanguageHaveWorkedWith"],
+        top_language,
+    )
+
+
+def render_bar_chart(data, x, y, x_label, y_label, color=None):
+    if data.empty:
+        st.info("No data for the current filters.")
+        return
+
+    fig = px.bar(
+        data,
+        x=x,
+        y=y,
+        color=color,
+        labels={x: x_label, y: y_label, color: color} if color else {x: x_label, y: y_label},
+    )
+    fig.update_layout(margin={"r": 8, "t": 8, "l": 8, "b": 8})
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def render_line_chart(data, x, y, x_label, y_label, color=None):
+    if data.empty:
+        st.info("No data for the current filters.")
+        return
+
+    fig = px.line(
+        data,
+        x=x,
+        y=y,
+        color=color,
+        markers=True,
+        labels={x: x_label, y: y_label, color: color} if color else {x: x_label, y: y_label},
+    )
+    fig.update_layout(margin={"r": 8, "t": 8, "l": 8, "b": 8})
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def aggregate_technology_counts(
+    technology_counts: pd.DataFrame,
+    category: str,
+    intent: str,
+    selected_years: list[int],
+    limit: int,
+) -> pd.DataFrame:
+    if not selected_years:
+        return pd.DataFrame(columns=["Technology", "Respondents"])
+
+    selected = multiyear_top_technologies(
+        technology_counts,
+        category=category,
+        intent=intent,
+        limit=limit,
+        years=selected_years,
+    )
+    if selected.empty:
+        return pd.DataFrame(columns=["Technology", "Respondents"])
+
+    return (
+        selected.groupby("Technology", as_index=False)["Respondents"]
+        .sum()
+        .sort_values("Respondents", ascending=False)
+        .head(limit)
     )
 
 
@@ -179,35 +390,81 @@ def render_overview_tab(filtered: pd.DataFrame):
     left, right = st.columns(2)
     with left:
         st.subheader("Respondents by country")
-        st.bar_chart(top_counts(filtered, "Country", 20), x="Country", y="count")
+        render_bar_chart(
+            top_counts(filtered, "Country", 20),
+            "Country",
+            "count",
+            "Country",
+            "Respondents",
+        )
     with right:
         st.subheader("Remote work")
-        st.bar_chart(top_counts(filtered, "RemoteWork", 10), x="RemoteWork", y="count")
+        render_bar_chart(
+            top_counts(filtered, "RemoteWork", 10),
+            "RemoteWork",
+            "count",
+            "Work format",
+            "Respondents",
+        )
 
     st.subheader("Education")
-    st.bar_chart(top_counts(filtered, "EdLevel", 15), x="EdLevel", y="count")
+    render_bar_chart(
+        top_counts(filtered, "EdLevel", 15),
+        "EdLevel",
+        "count",
+        "Education level",
+        "Respondents",
+    )
 
     st.subheader("Age")
-    st.bar_chart(top_counts(filtered, "Age", 12), x="Age", y="count")
+    render_bar_chart(
+        top_counts(filtered, "Age", 12),
+        "Age",
+        "count",
+        "Age group",
+        "Respondents",
+    )
 
 
 def render_salary_tab(filtered: pd.DataFrame):
     st.subheader("Median salary by country")
-    country_salary = salary_by_country(filtered, 20)
-    st.bar_chart(country_salary, x="Country", y="median_salary_usd")
+    country_salary = median_compensation_by_group(filtered, "Country", 20)
+    render_bar_chart(
+        country_salary,
+        "Country",
+        "median_salary_usd",
+        "Country",
+        "Median salary, USD",
+    )
 
     left, right = st.columns(2)
     with left:
         st.subheader("Median salary by experience")
-        experience_salary = median_salary_by_group(filtered, "YearsCodePro", 20)
-        st.bar_chart(experience_salary, x="YearsCodePro", y="median_salary_usd")
+        experience_salary = median_compensation_by_group(filtered, "ProfessionalExperience", 20)
+        render_bar_chart(
+            experience_salary,
+            "ProfessionalExperience",
+            "median_salary_usd",
+            "Professional experience, years",
+            "Median salary, USD",
+        )
     with right:
         st.subheader("Median salary by education")
-        education_salary = median_salary_by_group(filtered, "EdLevel", 12)
-        st.bar_chart(education_salary, x="EdLevel", y="median_salary_usd")
+        education_salary = median_compensation_by_group(filtered, "EdLevel", 12)
+        render_bar_chart(
+            education_salary,
+            "EdLevel",
+            "median_salary_usd",
+            "Education level",
+            "Median salary, USD",
+        )
 
     st.subheader("Salary distribution")
-    salary_values = filtered["salaryusd"].dropna()
+    if "ConvertedCompYearly" not in filtered:
+        st.info("No salary data for the current filters.")
+        return
+
+    salary_values = filtered["ConvertedCompYearly"].dropna()
     if salary_values.empty:
         st.info("No salary data for the current filters.")
         return
@@ -220,49 +477,142 @@ def render_salary_tab(filtered: pd.DataFrame):
         .reset_index(name="count")
     )
     salary_distribution["salary_range"] = salary_distribution["salary_range"].astype(str)
-    st.bar_chart(salary_distribution, x="salary_range", y="count")
+    render_bar_chart(
+        salary_distribution,
+        "salary_range",
+        "count",
+        "Salary range, USD",
+        "Respondents",
+    )
 
 
-def render_technologies_tab(data: DashboardData, filtered_ids: set):
+def render_technologies_tab(
+    data: DashboardData,
+    filtered_ids: set,
+    selected_years: list[int],
+):
     st.subheader("Language popularity")
-    language_counts = language_popularity(data.language, filtered_ids, 20)
-    st.bar_chart(language_counts, x="LanguageHaveWorkedWith", y="count")
+    language_counts = aggregate_technology_counts(
+        data.multiyear_technology_counts,
+        category="language",
+        intent="worked",
+        selected_years=selected_years,
+        limit=20,
+    )
+    render_bar_chart(
+        language_counts,
+        "Technology",
+        "Respondents",
+        "Programming language",
+        "Respondents",
+    )
 
     st.subheader("Worked vs wanted languages")
-    language_comparison = worked_vs_wanted_languages(
-        data.language, data.wanted_language, filtered_ids, 25
+    worked_languages = aggregate_technology_counts(
+        data.multiyear_technology_counts,
+        category="language",
+        intent="worked",
+        selected_years=selected_years,
+        limit=25,
+    ).rename(columns={"Respondents": "worked_count"})
+    wanted_languages = aggregate_technology_counts(
+        data.multiyear_technology_counts,
+        category="language",
+        intent="wanted",
+        selected_years=selected_years,
+        limit=25,
+    ).rename(columns={"Respondents": "wanted_count"})
+    language_comparison = worked_languages.merge(wanted_languages, on="Technology", how="outer")
+    language_comparison["worked_count"] = (
+        pd.to_numeric(language_comparison["worked_count"], errors="coerce").fillna(0).astype(int)
+    )
+    language_comparison["wanted_count"] = (
+        pd.to_numeric(language_comparison["wanted_count"], errors="coerce").fillna(0).astype(int)
+    )
+    language_comparison["want_gap"] = (
+        language_comparison["wanted_count"] - language_comparison["worked_count"]
     )
     st.dataframe(language_comparison, use_container_width=True)
 
     st.subheader("Technology popularity")
-    technology_counts = technology_popularity(data.technology_tables, filtered_ids, 15)
-    for category, category_data in technology_counts.groupby("category"):
+    technology_counts = data.multiyear_technology_counts
+    if technology_counts.empty or "Intent" not in technology_counts:
+        st.info("No technology data for the current filters.")
+        return
+
+    worked_categories = (
+        technology_counts.loc[technology_counts["Intent"] == "worked", "Category"].dropna().unique()
+    )
+    for category in sorted(worked_categories):
+        category_data = aggregate_technology_counts(
+            data.multiyear_technology_counts,
+            category=category,
+            intent="worked",
+            selected_years=selected_years,
+            limit=15,
+        )
         st.caption(category)
-        st.bar_chart(category_data, x="technology", y="count")
+        render_bar_chart(
+            category_data,
+            "Technology",
+            "Respondents",
+            "Technology",
+            "Respondents",
+        )
 
     st.subheader("Technology stack breadth")
     stack_width = technology_count_distribution(data.technology_tables, filtered_ids)
-    st.bar_chart(stack_width, x="technology_count", y="respondents")
+    render_bar_chart(
+        stack_width,
+        "technology_count",
+        "respondents",
+        "Technologies in stack",
+        "Respondents",
+    )
 
 
 def render_ai_tab(filtered: pd.DataFrame):
     left, right = st.columns(2)
     with left:
-        st.subheader("AI selection")
-        st.bar_chart(top_counts(filtered, "AISelect", 10), x="AISelect", y="count")
+        st.subheader("AI adoption")
+        render_bar_chart(
+            top_counts(filtered, "AIAdoption", 10),
+            "AIAdoption",
+            "count",
+            "AI adoption status",
+            "Respondents",
+        )
     with right:
         st.subheader("AI sentiment")
-        st.bar_chart(top_counts(filtered, "AISent", 10), x="AISent", y="count")
+        render_bar_chart(
+            top_counts(filtered, "AISent", 10),
+            "AISent",
+            "count",
+            "AI sentiment",
+            "Respondents",
+        )
 
 
 def render_work_tab(filtered: pd.DataFrame):
     left, right = st.columns(2)
     with left:
         st.subheader("Developer type")
-        st.bar_chart(top_counts(filtered, "DevType", 15), x="DevType", y="count")
+        render_bar_chart(
+            top_counts(filtered, "DevType", 15),
+            "DevType",
+            "count",
+            "Developer type",
+            "Respondents",
+        )
     with right:
         st.subheader("Job satisfaction")
-        st.bar_chart(top_counts(filtered, "JobSat", 12), x="JobSat", y="count")
+        render_bar_chart(
+            top_counts(filtered, "JobSatNormalized", 12),
+            "JobSatNormalized",
+            "count",
+            "Job satisfaction score",
+            "Respondents",
+        )
 
     st.subheader("Remote work by country")
     remote_by_country = (
@@ -275,75 +625,170 @@ def render_work_tab(filtered: pd.DataFrame):
     st.dataframe(remote_by_country, use_container_width=True)
 
 
-def render_trends_tab(data: DashboardData):
-    if data.multiyear_core.empty:
+def render_trends_tab(
+    filtered_multiyear: pd.DataFrame,
+    technology_counts: pd.DataFrame,
+    selected_years: list[int],
+):
+    if not selected_years:
+        st.info("Select at least one survey year.")
+        return
+    if filtered_multiyear.empty:
+        st.info("No data for the current filters.")
+        return
+    if technology_counts.empty:
         st.info("Run multi-year EDA to generate trend data.")
         return
 
     left, right = st.columns(2)
     with left:
         st.subheader("Median salary by year")
-        st.line_chart(
-            multiyear_salary_trend(data.multiyear_core),
-            x="SurveyYear",
-            y="median_salary_usd",
+        render_line_chart(
+            multiyear_salary_trend(filtered_multiyear, selected_years),
+            "SurveyYear",
+            "median_salary_usd",
+            "Survey year",
+            "Median salary, USD",
         )
     with right:
         st.subheader("AI adoption by year")
-        st.bar_chart(
-            multiyear_ai_adoption_trend(data.multiyear_core),
-            x="SurveyYear",
-            y="respondents",
-            color="AIAdoption",
+        render_bar_chart(
+            multiyear_ai_adoption_trend(filtered_multiyear, selected_years),
+            "SurveyYear",
+            "respondents",
+            "Survey year",
+            "Respondents",
+            "AIAdoption",
         )
 
     st.subheader("Remote work by year")
-    st.bar_chart(
-        multiyear_remote_trend(data.multiyear_core),
-        x="SurveyYear",
-        y="respondents",
-        color="RemoteWork",
+    render_bar_chart(
+        multiyear_remote_trend(filtered_multiyear, selected_years),
+        "SurveyYear",
+        "respondents",
+        "Survey year",
+        "Respondents",
+        "RemoteWork",
     )
 
     st.subheader("Top worked-with languages")
     language_trend = multiyear_top_technologies(
-        data.multiyear_technology_counts,
+        technology_counts,
         category="language",
         intent="worked",
         limit=10,
+        years=selected_years,
     )
-    st.line_chart(
+    render_line_chart(
         language_trend,
-        x="SurveyYear",
-        y="Respondents",
-        color="Technology",
+        "SurveyYear",
+        "Respondents",
+        "Survey year",
+        "Respondents",
+        "Technology",
+    )
+
+
+def render_world_map_tab(filtered_multiyear: pd.DataFrame, selected_years: list[int]):
+    if not selected_years:
+        st.info("Select at least one survey year.")
+        return
+    if filtered_multiyear.empty:
+        st.info("No data for the current filters.")
+        return
+
+    st.caption(f"Aggregated salary data for selected years: {', '.join(map(str, selected_years))}")
+    min_respondents = st.slider("Minimum salary respondents per country", 10, 300, 30, step=10)
+    salary_map = salary_map_by_country(
+        filtered_multiyear,
+        years=None,
+        min_respondents=min_respondents,
+    )
+
+    if salary_map.empty:
+        st.info("No countries match the current respondent threshold.")
+        return
+
+    try:
+        fig = px.choropleth(
+            salary_map,
+            locations="Country",
+            locationmode="country names",
+            color="median_salary_usd",
+            hover_name="Country",
+            hover_data={
+                "median_salary_usd": ":,.0f",
+                "respondents": ":,",
+                "Country": False,
+            },
+            color_continuous_scale="Viridis",
+            labels={
+                "median_salary_usd": "Median salary, USD",
+                "respondents": "Respondents",
+            },
+            projection="natural earth",
+        )
+        fig.update_layout(
+            margin={"r": 0, "t": 0, "l": 0, "b": 0},
+            coloraxis_colorbar_title="USD",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    except (ValueError, TypeError, RuntimeError) as error:
+        st.warning(f"Map rendering failed: {error}")
+
+    st.subheader("Highest median salaries")
+    st.dataframe(
+        salary_map.head(25).assign(
+            median_salary_usd=lambda frame: frame["median_salary_usd"].round(0).astype(int)
+        ),
+        use_container_width=True,
+        hide_index=True,
     )
 
 
 def main():
     st.title("Stack Overflow Developer Survey")
+    st.markdown(
+        '<p style="color:#16803c;font-weight:700;margin-top:-0.5rem;">'
+        "Идея с шариками принадлежит "
+        '<a href="https://github.com/Andekster" target="_blank" style="color:#16803c;">'
+        "Andekster</a>"
+        "</p>",
+        unsafe_allow_html=True,
+    )
+    maybe_show_balloons()
 
     data = load_data()
-    filtered = apply_filters(data.main, render_sidebar(data.main))
-    filtered_ids = set(filtered["ResponseId"])
-    render_kpis(filtered, data.language, filtered_ids)
-
-    overview_tab, salary_tab, tech_tab, ai_tab, work_tab, trends_tab = st.tabs(
-        ["Overview", "Salary", "Technologies", "AI", "Work & Career", "Trends"]
+    sidebar = render_sidebar(data.main, data.multiyear_core)
+    filtered = apply_filters(data.main, sidebar)
+    filtered_ids = (
+        set(filtered["ResponseId"]) if data.multiyear_core.empty or 2024 in sidebar.years else set()
+    )
+    filtered_multiyear = apply_multiyear_filters(data.multiyear_core, sidebar)
+    render_kpis(
+        filtered,
+        data.language,
+        filtered_ids,
+        filtered_multiyear,
+        data.multiyear_technology_counts,
+        sidebar.years,
+        not data.multiyear_core.empty,
     )
 
-    with overview_tab:
-        render_overview_tab(filtered)
-    with salary_tab:
-        render_salary_tab(filtered)
-    with tech_tab:
-        render_technologies_tab(data, filtered_ids)
-    with ai_tab:
-        render_ai_tab(filtered)
-    with work_tab:
-        render_work_tab(filtered)
-    with trends_tab:
-        render_trends_tab(data)
+    if sidebar.page == "Overview":
+        render_overview_tab(filtered_multiyear)
+    elif sidebar.page == "Salary":
+        render_salary_tab(filtered_multiyear)
+    elif sidebar.page == "World Map":
+        render_world_map_tab(filtered_multiyear, sidebar.years)
+    elif sidebar.page == "Technologies":
+        render_technologies_tab(data, filtered_ids, sidebar.years)
+    elif sidebar.page == "AI":
+        render_ai_tab(filtered_multiyear)
+    elif sidebar.page == "Work & Career":
+        render_work_tab(filtered_multiyear)
+    elif sidebar.page == "Trends":
+        render_trends_tab(filtered_multiyear, data.multiyear_technology_counts, sidebar.years)
 
 
 if __name__ == "__main__":
