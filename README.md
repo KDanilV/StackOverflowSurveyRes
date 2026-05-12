@@ -60,6 +60,8 @@ The generated files are intentionally not committed:
 
 ## Streamlit Dashboard
 
+Published app: [Stack Overflow Survey Analytics](https://stackoverflowsurveyanalysis22-25.streamlit.app/).
+
 Run the dashboard:
 
 ```powershell
