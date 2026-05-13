@@ -40,6 +40,11 @@ MAX_CHART_LABEL_LENGTH = 34
 MAX_EXPERIENCE_YEARS = 50
 MAX_SALARY_DISTRIBUTION_USD = 500_000
 SALARY_DISTRIBUTION_STEP_USD = 25_000
+SALARY_MAP_COLOR_SCALE = [
+    [0.0, "#c62828"],
+    [0.5, "#f9d65c"],
+    [1.0, "#1b8f3a"],
+]
 DISPLAY_VALUE_REPLACEMENTS = {
     "РСЃРїРѕР»СЊР·СѓРµС‚ AI": "Uses AI",
     "Использует AI": "Uses AI",
@@ -892,12 +897,12 @@ def render_world_map_tab(filtered_multiyear: pd.DataFrame, selected_years: list[
                 "respondents": ":,",
                 "Country": False,
             },
-            color_continuous_scale="Viridis",
+            color_continuous_scale=SALARY_MAP_COLOR_SCALE,
             labels={
                 "median_salary_usd": "Median salary, USD",
                 "respondents": "Respondents",
             },
-            projection="natural earth",
+            projection="robinson",
         )
         fig.update_layout(
             margin={"r": 0, "t": 0, "l": 0, "b": 0},
