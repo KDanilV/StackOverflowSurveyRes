@@ -123,6 +123,25 @@ def test_filter_multiyear_core_filters_minimum_country_respondents():
     assert result["ResponseId"].tolist() == [1, 2]
 
 
+def test_filter_multiyear_core_applies_country_threshold_after_other_filters():
+    source = pd.DataFrame(
+        {
+            "SurveyYear": [2024, 2024, 2024],
+            "ResponseId": [1, 2, 3],
+            "Country": ["A", "A", "B"],
+            "RemoteWork": ["Remote", "Hybrid", "Remote"],
+        }
+    )
+
+    result = filter_multiyear_core(
+        source,
+        remote_work=["Remote"],
+        minimum_country_respondents=2,
+    )
+
+    assert result.empty
+
+
 def test_multiselect_helpers_split_and_match_values():
     source = pd.Series(["Developer, back-end; Developer, full-stack", None, "Data scientist"])
 

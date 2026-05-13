@@ -168,10 +168,6 @@ def filter_multiyear_core(
 
     if countries and "Country" in filtered:
         filtered = filtered[filtered["Country"].isin(countries)]
-    if minimum_country_respondents and "Country" in filtered:
-        country_counts = filtered["Country"].value_counts()
-        valid_countries = country_counts[country_counts >= minimum_country_respondents].index
-        filtered = filtered[filtered["Country"].isin(valid_countries)]
     if remote_work and "RemoteWork" in filtered:
         filtered = filtered[filtered["RemoteWork"].isin(remote_work)]
     if education and "EdLevel" in filtered:
@@ -184,6 +180,10 @@ def filter_multiyear_core(
         filtered = filtered[
             experience.isna() | experience.between(min_experience, max_experience, inclusive="both")
         ]
+    if minimum_country_respondents and "Country" in filtered:
+        country_counts = filtered["Country"].value_counts()
+        valid_countries = country_counts[country_counts >= minimum_country_respondents].index
+        filtered = filtered[filtered["Country"].isin(valid_countries)]
 
     return filtered
 
