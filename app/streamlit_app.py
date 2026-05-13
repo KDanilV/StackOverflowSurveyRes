@@ -37,6 +37,9 @@ from stackoverflow_analytics.multiyear_eda import run_eda as run_multiyear_eda  
 
 TEST_MODE_ENV = "STACKOVERFLOW_ANALYTICS_TEST_MODE"
 MAX_CHART_LABEL_LENGTH = 34
+MAX_EXPERIENCE_YEARS = 50
+MAX_SALARY_DISTRIBUTION_USD = 500_000
+SALARY_DISTRIBUTION_STEP_USD = 25_000
 DISPLAY_VALUE_REPLACEMENTS = {
     "РСЃРїРѕР»СЊР·СѓРµС‚ AI": "Uses AI",
     "Использует AI": "Uses AI",
@@ -76,6 +79,7 @@ class SidebarState:
     education: list[str]
     developer_type: list[str]
     years: list[int]
+    experience_range: tuple[int, int]
 
 
 st.set_page_config(
@@ -121,6 +125,7 @@ def build_test_data() -> DashboardData:
                 "DevType": "Developer, full-stack",
                 "ConvertedCompYearly": 100000,
                 "ProfessionalExperience": 5,
+                "YearsCodePro": 5,
                 "AISent": "Favorable",
                 "JobSatNormalized": 8,
                 "AIAdoption": "Использует AI",
@@ -188,6 +193,8 @@ def build_main_from_multiyear(multiyear_core: pd.DataFrame) -> pd.DataFrame:
         "Age",
         "DevType",
         "ConvertedCompYearly",
+        "ProfessionalExperience",
+        "YearsCodePro",
     ]
     if multiyear_core.empty:
         return pd.DataFrame(columns=[*columns, "salaryusd"])
@@ -242,6 +249,35 @@ def chart_display_frame(
             display_columns[column] = display_column
 
     return display_data, display_columns
+
+
+def format_salary_range(left: float, right: float) -> str:
+    return f"${left:,.0f} - ${right:,.0f}"
+
+
+def salary_distribution_frame(
+    salary_values: pd.Series,
+    max_salary: int = MAX_SALARY_DISTRIBUTION_USD,
+    step: int = SALARY_DISTRIBUTION_STEP_USD,
+) -> pd.DataFrame:
+    salary = pd.to_numeric(salary_values, errors="coerce").dropna()
+    salary = salary[salary.between(0, max_salary, inclusive="both")]
+    if salary.empty:
+        return pd.DataFrame(columns=["salary_range", "count"])
+
+    bins = list(range(0, max_salary + step, step))
+    salary_bins = pd.cut(salary, bins=bins, include_lowest=True, right=False)
+    distribution = (
+        salary_bins.value_counts()
+        .sort_index()
+        .rename_axis("salary_range")
+        .reset_index(name="count")
+    )
+    distribution = distribution[distribution["count"] > 0]
+    distribution["salary_range"] = distribution["salary_range"].map(
+        lambda interval: format_salary_range(interval.left, interval.right)
+    )
+    return distribution
 
 
 def maybe_show_balloons():
@@ -306,6 +342,13 @@ def render_sidebar(main_table: pd.DataFrame, multiyear_core: pd.DataFrame) -> Si
             "Developer type",
             sidebar_options(filter_source, "DevType"),
         )
+        experience_range = st.slider(
+            "Professional experience, years",
+            min_value=0,
+            max_value=MAX_EXPERIENCE_YEARS,
+            value=(0, MAX_EXPERIENCE_YEARS),
+            step=1,
+        )
 
     return SidebarState(
         page=page,
@@ -314,6 +357,7 @@ def render_sidebar(main_table: pd.DataFrame, multiyear_core: pd.DataFrame) -> Si
         education=education,
         developer_type=developer_type,
         years=selected_years,
+        experience_range=experience_range,
     )
 
 
@@ -328,6 +372,11 @@ def apply_filters(main_table: pd.DataFrame, sidebar: SidebarState):
         filtered = filtered[
             contains_any_multiselect_value(filtered["DevType"], sidebar.developer_type)
         ]
+    if "YearsCodePro" in filtered:
+        experience = pd.to_numeric(filtered["YearsCodePro"], errors="coerce")
+        filtered = filtered[
+            experience.isna() | experience.between(*sidebar.experience_range, inclusive="both")
+        ]
     return filtered
 
 
@@ -339,6 +388,7 @@ def apply_multiyear_filters(multiyear_core: pd.DataFrame, sidebar: SidebarState)
         remote_work=sidebar.remote_work,
         education=sidebar.education,
         developer_type=sidebar.developer_type,
+        experience_range=sidebar.experience_range,
     )
 
 
@@ -552,19 +602,11 @@ def render_salary_tab(filtered: pd.DataFrame):
         st.info("No salary data for the current filters.")
         return
 
-    salary_values = filtered["ConvertedCompYearly"].dropna()
-    if salary_values.empty:
+    salary_distribution = salary_distribution_frame(filtered["ConvertedCompYearly"])
+    if salary_distribution.empty:
         st.info("No salary data for the current filters.")
         return
 
-    salary_bins = pd.cut(salary_values, bins=20)
-    salary_distribution = (
-        salary_bins.value_counts()
-        .sort_index()
-        .rename_axis("salary_range")
-        .reset_index(name="count")
-    )
-    salary_distribution["salary_range"] = salary_distribution["salary_range"].astype(str)
     render_bar_chart(
         salary_distribution,
         "salary_range",

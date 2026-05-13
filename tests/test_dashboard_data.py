@@ -94,6 +94,20 @@ def test_filter_multiyear_core_empty_year_selection_returns_no_rows():
     assert result.empty
 
 
+def test_filter_multiyear_core_filters_experience_range():
+    source = pd.DataFrame(
+        {
+            "SurveyYear": [2024, 2024, 2024],
+            "ResponseId": [1, 2, 3],
+            "ProfessionalExperience": [5, 99, pd.NA],
+        }
+    )
+
+    result = filter_multiyear_core(source, experience_range=(0, 50))
+
+    assert result["ResponseId"].tolist() == [1, 3]
+
+
 def test_multiselect_helpers_split_and_match_values():
     source = pd.Series(["Developer, back-end; Developer, full-stack", None, "Data scientist"])
 

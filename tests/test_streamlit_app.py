@@ -43,3 +43,14 @@ def test_streamlit_app_handles_empty_year_selection(monkeypatch):
         app.run(timeout=30)
 
         assert not app.exception
+
+
+def test_streamlit_app_handles_experience_filter(monkeypatch):
+    monkeypatch.setenv("STACKOVERFLOW_ANALYTICS_TEST_MODE", "1")
+
+    app = AppTest.from_file("app/streamlit_app.py")
+    app.run(timeout=30)
+    app.slider[0].set_range(0, 10)
+    app.run(timeout=30)
+
+    assert not app.exception

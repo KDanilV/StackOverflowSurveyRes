@@ -138,6 +138,7 @@ def filter_multiyear_core(
     remote_work=None,
     education=None,
     developer_type=None,
+    experience_range=None,
 ):
     filtered = core.copy()
 
@@ -158,6 +159,12 @@ def filter_multiyear_core(
         filtered = filtered[filtered["EdLevel"].isin(education)]
     if developer_type and "DevType" in filtered:
         filtered = filtered[contains_any_multiselect_value(filtered["DevType"], developer_type)]
+    if experience_range and "ProfessionalExperience" in filtered:
+        min_experience, max_experience = experience_range
+        experience = pd.to_numeric(filtered["ProfessionalExperience"], errors="coerce")
+        filtered = filtered[
+            experience.isna() | experience.between(min_experience, max_experience, inclusive="both")
+        ]
 
     return filtered
 
