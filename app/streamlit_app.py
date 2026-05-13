@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,6 +36,17 @@ from stackoverflow_analytics.dashboard_data import (
 from stackoverflow_analytics.multiyear_eda import run_eda as run_multiyear_eda  # noqa: E402
 
 TEST_MODE_ENV = "STACKOVERFLOW_ANALYTICS_TEST_MODE"
+MAX_CHART_LABEL_LENGTH = 34
+DISPLAY_VALUE_REPLACEMENTS = {
+    "РСЃРїРѕР»СЊР·СѓРµС‚ AI": "Uses AI",
+    "Использует AI": "Uses AI",
+    "РџР»Р°РЅРёСЂСѓРµС‚ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ AI": "Plans to use AI",
+    "Планирует использовать AI": "Plans to use AI",
+    "РќРµ РёСЃРїРѕР»СЊР·СѓРµС‚ AI": "Does not use AI",
+    "Не использует AI": "Does not use AI",
+    "РќРµС‚ РґР°РЅРЅС‹С…": "No data",
+    "Нет данных": "No data",
+}
 PAGES = [
     "Overview",
     "Salary",
@@ -193,6 +205,45 @@ def format_int(value):
     return f"{int(value):,}".replace(",", " ")
 
 
+def short_chart_label(value, max_length: int = MAX_CHART_LABEL_LENGTH) -> str:
+    if pd.isna(value):
+        return "n/a"
+
+    text = str(value).strip()
+    text = DISPLAY_VALUE_REPLACEMENTS.get(text, text)
+    is_interval = text.startswith(("(", "[")) and "," in text and text.endswith((")", "]"))
+    if not is_interval:
+        text = re.sub(r"\s*\([^)]*\)", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 1].rstrip() + "…"
+
+
+def chart_display_frame(
+    data: pd.DataFrame,
+    columns: list[str | None],
+    max_length: int = MAX_CHART_LABEL_LENGTH,
+) -> tuple[pd.DataFrame, dict[str, str]]:
+    display_data = data.copy()
+    display_columns = {}
+
+    for column in columns:
+        if (
+            column
+            and column in display_data
+            and not pd.api.types.is_numeric_dtype(display_data[column])
+        ):
+            display_column = f"{column}__display"
+            display_data[display_column] = display_data[column].map(
+                lambda value: short_chart_label(value, max_length)
+            )
+            display_columns[column] = display_column
+
+    return display_data, display_columns
+
+
 def maybe_show_balloons():
     if os.getenv(TEST_MODE_ENV) == "1":
         return
@@ -348,34 +399,48 @@ def render_kpis(
     )
 
 
-def render_bar_chart(data, x, y, x_label, y_label, color=None):
+def render_bar_chart(data, x, y, x_label, y_label, color=None, color_label=None):
     if data.empty:
         st.info("No data for the current filters.")
         return
 
+    chart_data, display_columns = chart_display_frame(data, [x, color])
+    chart_x = display_columns.get(x, x)
+    chart_color = display_columns.get(color, color)
+    labels = {chart_x: x_label, y: y_label}
+    if chart_color:
+        labels[chart_color] = color_label or color or "Category"
+
     fig = px.bar(
-        data,
-        x=x,
+        chart_data,
+        x=chart_x,
         y=y,
-        color=color,
-        labels={x: x_label, y: y_label, color: color} if color else {x: x_label, y: y_label},
+        color=chart_color,
+        labels=labels,
     )
     fig.update_layout(margin={"r": 8, "t": 8, "l": 8, "b": 8})
     st.plotly_chart(fig, use_container_width=True)
 
 
-def render_line_chart(data, x, y, x_label, y_label, color=None):
+def render_line_chart(data, x, y, x_label, y_label, color=None, color_label=None):
     if data.empty:
         st.info("No data for the current filters.")
         return
 
+    chart_data, display_columns = chart_display_frame(data, [x, color])
+    chart_x = display_columns.get(x, x)
+    chart_color = display_columns.get(color, color)
+    labels = {chart_x: x_label, y: y_label}
+    if chart_color:
+        labels[chart_color] = color_label or color or "Category"
+
     fig = px.line(
-        data,
-        x=x,
+        chart_data,
+        x=chart_x,
         y=y,
-        color=color,
+        color=chart_color,
         markers=True,
-        labels={x: x_label, y: y_label, color: color} if color else {x: x_label, y: y_label},
+        labels=labels,
     )
     fig.update_layout(margin={"r": 8, "t": 8, "l": 8, "b": 8})
     st.plotly_chart(fig, use_container_width=True)
@@ -682,6 +747,7 @@ def render_trends_tab(
             "Survey year",
             "Respondents",
             "AIAdoption",
+            "AI adoption status",
         )
 
     st.subheader("Remote work by year")
@@ -692,6 +758,7 @@ def render_trends_tab(
         "Survey year",
         "Respondents",
         "RemoteWork",
+        "Work format",
     )
 
     st.subheader("Top worked-with languages")
@@ -708,6 +775,7 @@ def render_trends_tab(
         "Respondents",
         "Survey year",
         "Respondents",
+        "Technology",
         "Technology",
     )
 
