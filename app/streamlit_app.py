@@ -10,7 +10,8 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from stackoverflow_analytics.config import (  # noqa: E402
-    CLEANED_SURVEY_FILE,
+    DASHBOARD_CORE_FILE,
+    DASHBOARD_TECHNOLOGY_COUNTS_FILE,
     MULTIYEAR_CORE_FILE,
     MULTIYEAR_TECHNOLOGY_COUNTS_FILE,
 )
@@ -24,19 +25,13 @@ from stackoverflow_analytics.dashboard_data import (
     multiyear_remote_trend,
     multiyear_salary_trend,
     multiyear_top_technologies,
-    prepare_main_table,
-    read_language_table,
-    read_main_table,
     read_multiyear_core,
     read_multiyear_technology_counts,
-    read_technology_tables,
-    read_wanted_language_table,
     salary_map_by_country,
     split_multiselect_values,
     technology_count_distribution,
     top_counts,
 )
-from stackoverflow_analytics.main import main as run_cleaning_pipeline  # noqa: E402
 from stackoverflow_analytics.multiyear_eda import run_eda as run_multiyear_eda  # noqa: E402
 
 TEST_MODE_ENV = "STACKOVERFLOW_ANALYTICS_TEST_MODE"
@@ -147,23 +142,51 @@ def load_data() -> DashboardData:
         return build_test_data()
 
     ensure_dashboard_outputs()
+    multiyear_core = read_multiyear_core()
 
     return DashboardData(
-        main=prepare_main_table(read_main_table()),
-        language=read_language_table(),
-        wanted_language=read_wanted_language_table(),
-        technology_tables=read_technology_tables(),
-        multiyear_core=read_multiyear_core(),
+        main=build_main_from_multiyear(multiyear_core),
+        language=pd.DataFrame(columns=["ResponseId", "LanguageHaveWorkedWith"]),
+        wanted_language=pd.DataFrame(columns=["ResponseId", "LanguageWantToWorkWith"]),
+        technology_tables={},
+        multiyear_core=multiyear_core,
         multiyear_technology_counts=read_multiyear_technology_counts(),
     )
 
 
 def ensure_dashboard_outputs():
-    if not CLEANED_SURVEY_FILE.exists():
-        run_cleaning_pipeline()
+    packaged_outputs_exist = (
+        DASHBOARD_CORE_FILE.exists() and DASHBOARD_TECHNOLOGY_COUNTS_FILE.exists()
+    )
+    processed_outputs_exist = (
+        MULTIYEAR_CORE_FILE.exists() and MULTIYEAR_TECHNOLOGY_COUNTS_FILE.exists()
+    )
+    if packaged_outputs_exist or processed_outputs_exist:
+        return
 
-    if not MULTIYEAR_CORE_FILE.exists() or not MULTIYEAR_TECHNOLOGY_COUNTS_FILE.exists():
-        run_multiyear_eda()
+    run_multiyear_eda()
+
+
+def build_main_from_multiyear(multiyear_core: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "ResponseId",
+        "Country",
+        "RemoteWork",
+        "EdLevel",
+        "Age",
+        "DevType",
+        "ConvertedCompYearly",
+    ]
+    if multiyear_core.empty:
+        return pd.DataFrame(columns=[*columns, "salaryusd"])
+
+    main = multiyear_core[multiyear_core["SurveyYear"] == 2024].copy()
+    if main.empty:
+        main = multiyear_core.copy()
+
+    main = main.reindex(columns=columns)
+    main["salaryusd"] = main["ConvertedCompYearly"]
+    return main
 
 
 def format_int(value):

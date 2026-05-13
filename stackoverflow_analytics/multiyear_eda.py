@@ -11,7 +11,13 @@ from typing import Any
 import pandas as pd
 from openpyxl import load_workbook
 
-from stackoverflow_analytics.config import MULTIYEAR_PROCESSED_DIR, RAW_DATA_DIR
+from stackoverflow_analytics.config import (
+    DASHBOARD_CORE_FILE,
+    DASHBOARD_DATA_DIR,
+    DASHBOARD_TECHNOLOGY_COUNTS_FILE,
+    MULTIYEAR_PROCESSED_DIR,
+    RAW_DATA_DIR,
+)
 
 YEARS = (2022, 2023, 2024, 2025)
 
@@ -379,6 +385,9 @@ def write_outputs(
 
     core.to_csv(output_dir / "core_survey.csv", index=False)
     technology_counts.to_csv(output_dir / "technology_counts.csv", index=False)
+    DASHBOARD_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    core.to_csv(DASHBOARD_CORE_FILE, index=False, compression="gzip")
+    technology_counts.to_csv(DASHBOARD_TECHNOLOGY_COUNTS_FILE, index=False, compression="gzip")
     (output_dir / "eda_summary.json").write_text(
         json.dumps(summaries, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",

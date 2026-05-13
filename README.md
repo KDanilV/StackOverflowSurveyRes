@@ -18,6 +18,7 @@ Balloon idea credit: [Andekster](https://github.com/Andekster).
 ```text
 data/
   raw/                      Source Stack Overflow survey files
+  dashboard/                Compact Streamlit-ready data committed for deployment
   processed/                Generated pipeline outputs, ignored by Git
 app/
   streamlit_app.py          Streamlit dashboard
@@ -68,8 +69,11 @@ Run the dashboard:
 uv run streamlit run app/streamlit_app.py
 ```
 
-If generated outputs are missing, the dashboard creates the cleaned workbook and multi-year
-EDA files from `data/raw/` during the first startup.
+For deployment, Streamlit reads compact files from `data/dashboard/` first. This keeps cold
+startup lightweight and avoids rebuilding large raw survey files on the server.
+
+If compact and processed multi-year outputs are missing, the dashboard can regenerate the
+multi-year EDA files from `data/raw/` during startup.
 
 Current dashboard sections:
 

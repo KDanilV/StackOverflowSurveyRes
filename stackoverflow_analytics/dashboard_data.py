@@ -3,6 +3,8 @@ from openpyxl import load_workbook
 
 from stackoverflow_analytics.config import (
     CLEANED_SURVEY_FILE,
+    DASHBOARD_CORE_FILE,
+    DASHBOARD_TECHNOLOGY_COUNTS_FILE,
     MULTIYEAR_CORE_FILE,
     MULTIYEAR_TECHNOLOGY_COUNTS_FILE,
 )
@@ -299,7 +301,10 @@ def technology_count_distribution(technology_tables, response_ids=None):
     )
 
 
-def read_multiyear_core(input_file=MULTIYEAR_CORE_FILE):
+def read_multiyear_core(input_file=None):
+    input_file = input_file or (
+        DASHBOARD_CORE_FILE if DASHBOARD_CORE_FILE.exists() else MULTIYEAR_CORE_FILE
+    )
     if not input_file.exists():
         return pd.DataFrame()
 
@@ -316,7 +321,12 @@ def read_multiyear_core(input_file=MULTIYEAR_CORE_FILE):
     return core
 
 
-def read_multiyear_technology_counts(input_file=MULTIYEAR_TECHNOLOGY_COUNTS_FILE):
+def read_multiyear_technology_counts(input_file=None):
+    input_file = input_file or (
+        DASHBOARD_TECHNOLOGY_COUNTS_FILE
+        if DASHBOARD_TECHNOLOGY_COUNTS_FILE.exists()
+        else MULTIYEAR_TECHNOLOGY_COUNTS_FILE
+    )
     if not input_file.exists():
         return pd.DataFrame()
 
