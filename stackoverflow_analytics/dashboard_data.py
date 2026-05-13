@@ -125,10 +125,24 @@ def split_multiselect_values(values: pd.Series) -> pd.Series:
     return split_values[split_values != ""]
 
 
+def normalize_multiselect_value(value) -> str:
+    return " ".join(str(value).split()).casefold()
+
+
+def unique_multiselect_options(values: pd.Series) -> list[str]:
+    options = {}
+    for value in split_multiselect_values(values):
+        normalized = normalize_multiselect_value(value)
+        options.setdefault(normalized, value)
+    return sorted(options.values(), key=str.casefold)
+
+
 def contains_any_multiselect_value(values: pd.Series, selected_values: list[str]) -> pd.Series:
-    selected = set(selected_values)
+    selected = {normalize_multiselect_value(value) for value in selected_values}
     split_values = values.fillna("").astype(str).str.split(";")
-    return split_values.apply(lambda items: bool({item.strip() for item in items} & selected))
+    return split_values.apply(
+        lambda items: bool({normalize_multiselect_value(item) for item in items} & selected)
+    )
 
 
 def filter_multiyear_core(
@@ -139,6 +153,7 @@ def filter_multiyear_core(
     education=None,
     developer_type=None,
     experience_range=None,
+    minimum_country_respondents=0,
 ):
     filtered = core.copy()
 
@@ -153,6 +168,10 @@ def filter_multiyear_core(
 
     if countries and "Country" in filtered:
         filtered = filtered[filtered["Country"].isin(countries)]
+    if minimum_country_respondents and "Country" in filtered:
+        country_counts = filtered["Country"].value_counts()
+        valid_countries = country_counts[country_counts >= minimum_country_respondents].index
+        filtered = filtered[filtered["Country"].isin(valid_countries)]
     if remote_work and "RemoteWork" in filtered:
         filtered = filtered[filtered["RemoteWork"].isin(remote_work)]
     if education and "EdLevel" in filtered:

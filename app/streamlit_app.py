@@ -29,9 +29,9 @@ from stackoverflow_analytics.dashboard_data import (
     read_multiyear_core,
     read_multiyear_technology_counts,
     salary_map_by_country,
-    split_multiselect_values,
     technology_count_distribution,
     top_counts,
+    unique_multiselect_options,
 )
 from stackoverflow_analytics.multiyear_eda import run_eda as run_multiyear_eda  # noqa: E402
 
@@ -80,6 +80,7 @@ class SidebarState:
     developer_type: list[str]
     years: list[int]
     experience_range: tuple[int, int]
+    minimum_country_respondents: int
 
 
 st.set_page_config(
@@ -303,8 +304,25 @@ def sidebar_options(source: pd.DataFrame, column: str) -> list[str]:
         return []
     values = source[column].dropna().astype(str)
     if column == "DevType":
-        values = split_multiselect_values(source[column])
+        return unique_multiselect_options(source[column])
     return sorted(values[values != ""].unique())
+
+
+def filter_by_years(frame: pd.DataFrame, years: list[int]) -> pd.DataFrame:
+    if frame.empty or "SurveyYear" not in frame or not years:
+        return frame.iloc[0:0].copy() if not years else frame
+    return frame[frame["SurveyYear"].isin(years)]
+
+
+def countries_with_minimum_respondents(
+    frame: pd.DataFrame,
+    minimum_respondents: int,
+) -> list[str]:
+    if frame.empty or "Country" not in frame:
+        return []
+
+    counts = frame["Country"].dropna().astype(str).value_counts()
+    return sorted(counts[counts >= minimum_respondents].index)
 
 
 def render_sidebar(main_table: pd.DataFrame, multiyear_core: pd.DataFrame) -> SidebarState:
@@ -326,9 +344,21 @@ def render_sidebar(main_table: pd.DataFrame, multiyear_core: pd.DataFrame) -> Si
             selected_years = []
 
         st.header("Filters")
+        minimum_country_respondents = st.number_input(
+            "Minimum respondents per country",
+            min_value=1,
+            max_value=10_000,
+            value=1,
+            step=50,
+        )
+        country_source = filter_by_years(filter_source, selected_years)
+        country_options = countries_with_minimum_respondents(
+            country_source,
+            int(minimum_country_respondents),
+        )
         countries = st.multiselect(
             "Country",
-            sidebar_options(filter_source, "Country"),
+            country_options,
         )
         remote_work = st.multiselect(
             "Remote work",
@@ -358,6 +388,7 @@ def render_sidebar(main_table: pd.DataFrame, multiyear_core: pd.DataFrame) -> Si
         developer_type=developer_type,
         years=selected_years,
         experience_range=experience_range,
+        minimum_country_respondents=int(minimum_country_respondents),
     )
 
 
@@ -377,6 +408,12 @@ def apply_filters(main_table: pd.DataFrame, sidebar: SidebarState):
         filtered = filtered[
             experience.isna() | experience.between(*sidebar.experience_range, inclusive="both")
         ]
+    if sidebar.minimum_country_respondents and "Country" in filtered:
+        valid_countries = countries_with_minimum_respondents(
+            filtered,
+            sidebar.minimum_country_respondents,
+        )
+        filtered = filtered[filtered["Country"].isin(valid_countries)]
     return filtered
 
 
@@ -389,6 +426,7 @@ def apply_multiyear_filters(multiyear_core: pd.DataFrame, sidebar: SidebarState)
         education=sidebar.education,
         developer_type=sidebar.developer_type,
         experience_range=sidebar.experience_range,
+        minimum_country_respondents=sidebar.minimum_country_respondents,
     )
 
 

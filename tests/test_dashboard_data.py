@@ -16,6 +16,7 @@ from stackoverflow_analytics.dashboard_data import (
     technology_count_distribution,
     technology_popularity,
     top_counts,
+    unique_multiselect_options,
     worked_vs_wanted_languages,
 )
 
@@ -108,6 +109,20 @@ def test_filter_multiyear_core_filters_experience_range():
     assert result["ResponseId"].tolist() == [1, 3]
 
 
+def test_filter_multiyear_core_filters_minimum_country_respondents():
+    source = pd.DataFrame(
+        {
+            "SurveyYear": [2024, 2024, 2024],
+            "ResponseId": [1, 2, 3],
+            "Country": ["A", "A", "B"],
+        }
+    )
+
+    result = filter_multiyear_core(source, minimum_country_respondents=2)
+
+    assert result["ResponseId"].tolist() == [1, 2]
+
+
 def test_multiselect_helpers_split_and_match_values():
     source = pd.Series(["Developer, back-end; Developer, full-stack", None, "Data scientist"])
 
@@ -116,6 +131,20 @@ def test_multiselect_helpers_split_and_match_values():
 
     assert values.tolist() == ["Developer, back-end", "Developer, full-stack", "Data scientist"]
     assert mask.tolist() == [True, False, False]
+
+
+def test_unique_multiselect_options_deduplicates_case_and_spacing():
+    source = pd.Series(
+        [
+            "Senior Executive (C-Suite, VP, etc.)",
+            "Senior executive (C-suite, VP, etc.)",
+            "Developer, full-stack",
+        ]
+    )
+
+    result = unique_multiselect_options(source)
+
+    assert result == ["Developer, full-stack", "Senior Executive (C-Suite, VP, etc.)"]
 
 
 def test_top_counts_returns_sorted_counts():

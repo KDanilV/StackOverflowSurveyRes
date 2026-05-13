@@ -54,3 +54,14 @@ def test_streamlit_app_handles_experience_filter(monkeypatch):
     app.run(timeout=30)
 
     assert not app.exception
+
+
+def test_streamlit_app_handles_country_respondent_threshold(monkeypatch):
+    monkeypatch.setenv("STACKOVERFLOW_ANALYTICS_TEST_MODE", "1")
+
+    app = AppTest.from_file("app/streamlit_app.py")
+    app.run(timeout=30)
+    app.number_input[0].set_value(2)
+    app.run(timeout=30)
+
+    assert not app.exception
