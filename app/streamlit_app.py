@@ -218,6 +218,10 @@ def format_int(value):
     return f"{int(value):,}".replace(",", " ")
 
 
+def info_en_ru(english: str, russian: str):
+    st.info(f"{english}\n\n{russian}")
+
+
 def short_chart_label(value, max_length: int = MAX_CHART_LABEL_LENGTH) -> str:
     if pd.isna(value):
         return "n/a"
@@ -349,6 +353,10 @@ def render_sidebar(main_table: pd.DataFrame, multiyear_core: pd.DataFrame) -> Si
             selected_years = []
 
         st.header("Filters")
+        info_en_ru(
+            "Filters apply to all pages where the underlying multi-year data supports them.",
+            "Фильтры применяются ко всем страницам, где это позволяет многолетняя витрина данных.",
+        )
         minimum_country_respondents = st.number_input(
             "Minimum respondents per country",
             min_value=1,
@@ -568,6 +576,10 @@ def aggregate_technology_counts(
 
 
 def render_overview_tab(filtered: pd.DataFrame):
+    info_en_ru(
+        "This page shows who responded: geography, work format, education, and age.",
+        "Эта страница показывает состав респондентов: географию, формат работы, образование и возраст.",
+    )
     left, right = st.columns(2)
     with left:
         st.subheader("Respondents by country")
@@ -608,6 +620,10 @@ def render_overview_tab(filtered: pd.DataFrame):
 
 
 def render_salary_tab(filtered: pd.DataFrame):
+    info_en_ru(
+        "Salary views use annual compensation in USD and exclude extreme values from the histogram scale.",
+        "Раздел зарплат использует годовую компенсацию в USD и исключает экстремальные значения из шкалы гистограммы.",
+    )
     st.subheader("Median salary by country")
     country_salary = median_compensation_by_group(filtered, "Country", 20)
     render_bar_chart(
@@ -664,6 +680,10 @@ def render_technologies_tab(
     filtered_ids: set,
     selected_years: list[int],
 ):
+    info_en_ru(
+        "Technology charts compare worked-with and wanted tools across the selected survey years.",
+        "Графики технологий сравнивают используемые и желаемые инструменты за выбранные годы опроса.",
+    )
     st.subheader("Language popularity")
     language_counts = aggregate_technology_counts(
         data.multiyear_technology_counts,
@@ -745,6 +765,10 @@ def render_technologies_tab(
 
 
 def render_ai_tab(filtered: pd.DataFrame):
+    info_en_ru(
+        "AI charts summarize adoption and sentiment among respondents that match the current filters.",
+        "Графики AI показывают использование и отношение к AI среди респондентов, подходящих под текущие фильтры.",
+    )
     left, right = st.columns(2)
     with left:
         st.subheader("AI adoption")
@@ -767,6 +791,10 @@ def render_ai_tab(filtered: pd.DataFrame):
 
 
 def render_work_tab(filtered: pd.DataFrame):
+    info_en_ru(
+        "Work and career views highlight developer roles, job satisfaction, and remote-work patterns.",
+        "Раздел работы и карьеры показывает роли разработчиков, удовлетворённость работой и паттерны удалённой работы.",
+    )
     left, right = st.columns(2)
     with left:
         st.subheader("Developer type")
@@ -803,6 +831,10 @@ def render_trends_tab(
     technology_counts: pd.DataFrame,
     selected_years: list[int],
 ):
+    info_en_ru(
+        "Trends show how salary, AI adoption, remote work, and languages changed across selected years.",
+        "Тренды показывают, как зарплаты, использование AI, удалённая работа и языки менялись по выбранным годам.",
+    )
     if not selected_years:
         st.info("Select at least one survey year.")
         return
@@ -866,6 +898,10 @@ def render_trends_tab(
 
 
 def render_world_map_tab(filtered_multiyear: pd.DataFrame, selected_years: list[int]):
+    info_en_ru(
+        "The map compares median salary by country; green means higher salary, red means lower salary.",
+        "Карта сравнивает медианную зарплату по странам: зелёный означает более высокую зарплату, красный — более низкую.",
+    )
     if not selected_years:
         st.info("Select at least one survey year.")
         return
@@ -931,6 +967,10 @@ def main():
         "Andekster</a>"
         "</p>",
         unsafe_allow_html=True,
+    )
+    info_en_ru(
+        "Interactive analytics for Stack Overflow survey data across 2022-2025.",
+        "Интерактивная аналитика по данным опроса Stack Overflow за 2022-2025 годы.",
     )
     maybe_show_balloons()
 
